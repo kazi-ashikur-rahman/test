@@ -49,45 +49,91 @@ jobs:
         run: |
           echo "🔍 Analyzing changed lines..."
           
-          # Create a detailed diff to get exact line changes
+          # Create a detailed diff to get exact line changes (only additions and modifications)
           git diff --unified=0 origin/$BASE_BRANCH...HEAD > full_diff.txt
           
-          # Create a Python script to parse changed lines
+          echo "=== DEBUG: Full diff content ==="
+          cat full_diff.txt
+          echo "=== END DEBUG ==="
+          
+          # Create a Python script to parse only ADDED/MODIFIED lines
           cat > parse_changes.py <<'EOF'
           import re
           import json
           
           changed_lines = {}
           current_file = None
+          current_line_num = 0
           
           with open('full_diff.txt', 'r') as f:
-              for line in f:
-                  line = line.rstrip()
-                  if line.startswith('+++'):
-                      # New file path: +++ b/path/to/file
-                      if line.startswith('+++ b/'):
-                          current_file = line[6:]
-                      elif line.startswith('+++ '):
-                          current_file = line[4:]
-                      if current_file and current_file != '/dev/null':
-                          changed_lines[current_file] = []
-                  elif line.startswith('@@') and current_file:
-                      # Parse hunk header: @@ -old_start,old_count +new_start,new_count @@
-                      match = re.search(r'\+(\d+)(?:,(\d+))?', line)
-                      if match:
-                          start_line = int(match.group(1))
-                          count = int(match.group(2)) if match.group(2) else 1
-                          # Add all changed line numbers
-                          for line_num in range(start_line, start_line + count):
-                              changed_lines[current_file].append(line_num)
+              lines = f.readlines()
+          
+          i = 0
+          while i < len(lines):
+              line = lines[i].rstrip()
+              
+              if line.startswith('+++'):
+                  # New file path: +++ b/path/to/file
+                  if line.startswith('+++ b/'):
+                      current_file = line[6:]
+                  elif line.startswith('+++ '):
+                      current_file = line[4:]
+                  if current_file and current_file != '/dev/null':
+                      changed_lines[current_file] = []
+                      
+              elif line.startswith('@@') and current_file:
+                  # Parse hunk header: @@ -old_start,old_count +new_start,new_count @@
+                  match = re.search(r'@@\s+-\d+(?:,\d+)?\s+\+(\d+)(?:,(\d+))?\s+@@', line)
+                  if match:
+                      new_start = int(match.group(1))
+                      new_count = int(match.group(2)) if match.group(2) else 1
+                      current_line_num = new_start
+                      
+                      print(f"DEBUG: Processing hunk in {current_file}: +{new_start},{new_count}")
+                      
+                      # Process the actual diff lines in this hunk
+                      j = i + 1
+                      while j < len(lines):
+                          diff_line = lines[j].rstrip()
+                          
+                          # Stop at next file or hunk
+                          if diff_line.startswith('+++') or diff_line.startswith('---') or diff_line.startswith('@@'):
+                              break
+                              
+                          if diff_line.startswith('+'):
+                              # This is an added line
+                              changed_lines[current_file].append(current_line_num)
+                              print(f"DEBUG: Added line {current_line_num}: {diff_line[1:30]}...")
+                              current_line_num += 1
+                          elif diff_line.startswith('-'):
+                              # This is a removed line (don't increment new line number)
+                              print(f"DEBUG: Removed line: {diff_line[1:30]}...")
+                              pass
+                          elif diff_line.startswith(' '):
+                              # This is a context line (increment line number but don't track)
+                              current_line_num += 1
+                          elif not diff_line.strip():
+                              # Empty line, continue
+                              pass
+                          else:
+                              # End of this hunk
+                              break
+                              
+                          j += 1
+                      i = j - 1
+              i += 1
           
           # Save changed lines info
           with open('changed_lines.json', 'w') as f:
               json.dump(changed_lines, f, indent=2)
           
-          print("Changed lines per file:")
+          print("\n=== FINAL RESULT ===")
+          print("Changed/Added lines per file:")
           for file, lines in changed_lines.items():
-              print(f"  {file}: lines {sorted(lines)}")
+              if lines:
+                  print(f"  {file}: lines {sorted(set(lines))}")
+              else:
+                  print(f"  {file}: no added/modified lines")
           EOF
           
           python parse_changes.py
