@@ -2,11 +2,19 @@ name: Semgrep PR Scan with Comment
 
 on:
   pull_request:
+    branches:
+      - main
+      - stg
+      - dev
 
 jobs:
   semgrep:
     runs-on: ubuntu-latest
-    environment: SEMGREP   # <-- the environment where you added SEMGREP_APP_TOKEN
+    environment: SEMGREP   # <-- The environment with SEMGREP_APP_TOKEN
+    permissions:
+      contents: read
+      pull-requests: write
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -19,12 +27,12 @@ jobs:
       - name: Install Semgrep
         run: python -m pip install --upgrade pip semgrep
 
-      - name: Run Semgrep (JSON output)
+      - name: Run Semgrep scan
         env:
           SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
         run: semgrep --config p/default --json --output semgrep-report.json .
 
-      - name: Build Markdown summary
+      - name: Build Markdown report
         run: |
           python - <<'PY'
           import json
@@ -35,7 +43,6 @@ jobs:
                       return d[k]
               return None
 
-          report = {}
           try:
               report = json.load(open('semgrep-report.json'))
           except Exception as e:
