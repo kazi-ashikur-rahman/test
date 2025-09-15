@@ -1,6 +1,6 @@
 name: Semgrep PR Scan with Comment
 
-# Trigger only for PRs targeting specific branches
+# Trigger only for PRs targeting main, stg, dev
 on:
   pull_request:
     branches:
@@ -56,8 +56,9 @@ jobs:
               raise
 
           results = report.get('results', []) or []
+
           if not results:
-              md = "✅ **Semgrep:** no findings.\n"
+              md = "✅ **Semgrep Scan Result:** No risks found. Your code passed the security scan!\n"
           else:
               counts = {}
               lines = []
@@ -75,7 +76,7 @@ jobs:
                   code_block = f"```{snippet}```" if snippet else ""
                   lines.append(f"- **{severity}** `{rule}` — {message}\n  `{path}:{line}`\n\n{code_block}\n")
 
-              header = f"🚨 **Semgrep** found **{len(results)}** issue(s)\n\n"
+              header = f"🚨 **Semgrep Scan Result:** Found **{len(results)}** potential issue(s)\n\n"
               header += "Severity counts:\n" + "\n".join([f"- {k}: {v}" for k,v in sorted(counts.items(), key=lambda x: x[0], reverse=True)]) + "\n\n"
               header += f"Showing up to {max_show} findings:\n\n"
               md = header + "\n".join(lines)
