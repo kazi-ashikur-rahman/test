@@ -10,12 +10,12 @@ on:
 jobs:
   semgrep:
     runs-on: ubuntu-latest
-    environment: SEMGREP  # environment with SEMGREP_APP_TOKEN
+    environment: SEMGREP  # environment where SEMGREP_APP_TOKEN is set
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0   # needed for diff against base branch
+          fetch-depth: 0  # Needed for diff scans
 
       - name: Setup Python
         uses: actions/setup-python@v4
@@ -25,40 +25,50 @@ jobs:
       - name: Install Semgrep
         run: python -m pip install --upgrade pip semgrep
 
-      - name: Run Semgrep on PR diff
+      - name: Run Semgrep diff scan (JSON output)
         env:
           SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+          BASE_BRANCH: ${{ github.event.pull_request.base.ref }}
         run: |
-          BASE_BRANCH=${{ github.event.pull_request.base.ref }}
-          echo "Diffing against $BASE_BRANCH"
           git fetch origin $BASE_BRANCH
-          semgrep --config p/default --json --output semgrep-report.json --diff origin/$BASE_BRANCH
+          semgrep ci --config=auto --json --output semgrep-report.json
 
-      - name: Build concise PR comment
+      - name: Build Markdown summary
         run: |
           python - <<'PY'
           import json
-          report = json.load(open("semgrep-report.json"))
-          results = report.get("results", [])
+
+          def pick(d, *keys):
+              for k in keys:
+                  if k in d and d[k] is not None:
+                      return d[k]
+              return None
+
+          report = {}
+          try:
+              report = json.load(open('semgrep-report.json'))
+          except Exception as e:
+              open('semgrep_report.md','w').write("❗ Failed to read semgrep output: "+str(e))
+              raise
+
+          results = report.get('results', []) or []
           if not results:
-              md = "✅ **Semgrep:** No new issues detected in this PR."
+              md = "✅ **Semgrep:** No new issues found in this PR.\n"
           else:
-              counts = {}
               lines = []
               for r in results:
-                  severity = r.get("extra", {}).get("severity") or r.get("severity") or "INFO"
-                  counts[severity] = counts.get(severity, 0) + 1
-                  rule = r.get("check_id") or r.get("rule_id") or "unknown"
-                  path = r.get("path") or (r.get("start") or {}).get("path") or "unknown"
-                  line = (r.get("start") or {}).get("line") or ""
-                  lines.append(f"- **{severity.upper()}** `{rule}` in `{path}:{line}`")
+                  extra = r.get('extra', {}) if isinstance(r.get('extra', {}), dict) else {}
+                  rule = pick(r, 'check_id', 'rule_id', 'rule') or 'unknown'
+                  message = pick(extra, 'message') or r.get('message','').strip()
+                  path = pick(r, 'path') or (r.get('start') or {}).get('path') or 'unknown'
+                  line = (r.get('start') or {}).get('line') or (extra.get('start') or '')
+                  severity = (extra.get('severity') or r.get('severity') or 'INFO').upper()
+                  lines.append(f"- **{severity}** `{rule}` — `{path}:{line}` — {message}")
 
-              header = f"🚨 **Semgrep** found {len(results)} new issue(s) in this PR\n\n"
-              header += "Severity counts: " + ", ".join([f"{k}: {v}" for k,v in counts.items()]) + "\n\n"
+              header = f"🚨 **Semgrep PR Scan Result:** Found **{len(results)}** potential issue(s)\n\n"
               md = header + "\n".join(lines)
 
-          with open("semgrep_report.md", "w") as f:
-              f.write(md)
+          open('semgrep_report.md','w').write(md)
           print(md)
           PY
 
