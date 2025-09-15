@@ -39,11 +39,14 @@ jobs:
           # Remove empty lines
           CHANGED_FILES=$(echo "$CHANGED_FILES" | grep -v '^$')
 
-          echo "Changed files:"
-          echo "$CHANGED_FILES"
+          # Convert to single-line, space-separated string
+          CHANGED_FILES_SINGLE=$(echo "$CHANGED_FILES" | tr '\n' ' ')
 
-          # Export for next step as a single-line, space-separated string
-          echo "CHANGED_FILES=$CHANGED_FILES" >> $GITHUB_ENV
+          echo "Changed files:"
+          echo "$CHANGED_FILES_SINGLE"
+
+          # Export for next step
+          echo "CHANGED_FILES=$CHANGED_FILES_SINGLE" >> $GITHUB_ENV
 
       - name: Run Semgrep on changed files
         run: |
