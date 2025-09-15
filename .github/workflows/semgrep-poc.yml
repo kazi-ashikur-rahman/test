@@ -1,4 +1,8 @@
-name: Semgrep PR Scan on Changed Files
+name: Semgrep PR Scan on Changed Lines
+
+permissions:
+  pull-requests: write
+  contents: read
 
 on:
   pull_request:
@@ -6,10 +10,6 @@ on:
       - main
       - stg
       - dev
-      
-permissions:
-  pull-requests: write
-  contents: read
 
 jobs:
   semgrep:
@@ -38,30 +38,23 @@ jobs:
           git fetch origin $BASE_BRANCH
 
           # Get changed files
-          CHANGED_FILES=$(git diff --name-only origin/$BASE_BRANCH...HEAD)
-
-          # Remove empty lines
-          CHANGED_FILES=$(echo "$CHANGED_FILES" | grep -v '^$')
-
-          # Convert to single-line, space-separated string
-          CHANGED_FILES_SINGLE=$(echo "$CHANGED_FILES" | tr '\n' ' ')
+          CHANGED_FILES=$(git diff --name-only origin/$BASE_BRANCH...HEAD | grep -v '^$')
 
           echo "Changed files:"
-          echo "$CHANGED_FILES_SINGLE"
+          echo "$CHANGED_FILES"
 
           # Export for next step
-          echo "CHANGED_FILES=$CHANGED_FILES_SINGLE" >> $GITHUB_ENV
+          echo "CHANGED_FILES=$CHANGED_FILES" >> $GITHUB_ENV
 
-      - name: Run Semgrep on changed files
+      - name: Run Semgrep on changed lines
         run: |
-          echo "Changed files to scan: $CHANGED_FILES"
           if [ -z "$CHANGED_FILES" ]; then
             echo "✅ No changed files. Skipping Semgrep."
             echo '{}' > semgrep-report.json
           else
-            echo "🔍 Running Semgrep on changed files..."
-            semgrep --config auto --json --output semgrep-report.json $CHANGED_FILES
-          fi
+            echo "🔍 Running Semgrep only on changed lines..."
+            # Use diff mode relative to base branch
+            semgrep --config auto --json --diff origin/$BASE_BRANCH --output semgrep-report.json $CHANGED_FILES
 
       - name: Build Markdown summary
         run: |
