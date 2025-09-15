@@ -54,7 +54,7 @@ jobs:
             echo '{}' > semgrep-report.json
           else
             echo "🔍 Running Semgrep only on changed lines..."
-            semgrep --config auto --json -d origin/$BASE_BRANCH --output semgrep-report.json
+            semgrep --config auto --json -d origin/${{ github.event.pull_request.base.ref }} --output semgrep-report.json
           fi
 
       - name: Build Markdown summary
