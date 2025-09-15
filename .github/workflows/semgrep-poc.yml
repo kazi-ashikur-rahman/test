@@ -25,45 +25,93 @@ jobs:
       - name: Install Semgrep
         run: python -m pip install --upgrade pip semgrep
       
-      - name: Get changed files
+      - name: Get changed files and lines
         id: changes
         run: |
           BASE_BRANCH=${{ github.event.pull_request.base.ref }}
           echo "Base branch: $BASE_BRANCH"
+          
           # Fetch base branch
           git fetch origin $BASE_BRANCH
+          
           # Get changed files
-          CHANGED_FILES=$(git diff --name-only origin/$BASE_BRANCH...HEAD | grep -v '^$' || true)
+          CHANGED_FILES=$(git diff --name-only origin/$BASE_BRANCH...HEAD | grep -E '\.(js|jsx|ts|tsx|py|java|go|php|rb|c|cpp|cs|kt|swift)$' || true)
           echo "Changed files:"
           echo "$CHANGED_FILES"
+          
           # Export for next step
           echo "CHANGED_FILES<<EOF" >> $GITHUB_ENV
           echo "$CHANGED_FILES" >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
           echo "BASE_BRANCH=$BASE_BRANCH" >> $GITHUB_ENV
       
-      - name: Run Semgrep on changed lines
+      - name: Run Semgrep on changed lines only
         run: |
           echo "Changed files to scan: $CHANGED_FILES"
+          
           if [ -z "$CHANGED_FILES" ]; then
             echo "✅ No changed files. Skipping Semgrep."
             echo '{"results":[]}' > semgrep-report.json
           else
-            echo "🔍 Running Semgrep on changed files..."
-            # Create a temporary file with changed files
-            echo "$CHANGED_FILES" > changed_files.txt
+            echo "🔍 Running Semgrep on changed lines only..."
             
-            # Run semgrep on changed files only
-            if [ -s changed_files.txt ]; then
-              # Option 1: Scan only the changed files
-              semgrep --config auto --json --output semgrep-report.json $(echo "$CHANGED_FILES" | tr '\n' ' ')
-              
-              # Option 2: Alternative - use baseline comparison (uncomment if preferred)
-              # semgrep --config auto --json --baseline-ref origin/$BASE_BRANCH --output semgrep-report.json .
-            else
-              echo "No valid files to scan"
-              echo '{"results":[]}' > semgrep-report.json
-            fi
+            # Use semgrep's baseline functionality to scan only new/changed code
+            # This scans the entire repo but reports only findings on changed lines
+            semgrep --config auto --json --baseline-ref origin/$BASE_BRANCH --output semgrep-report.json .
+            
+            # Alternative: Manual line filtering (more precise but complex)
+            # Uncomment below if you need even more precise line-level filtering
+            
+            # Create a script to filter results to changed lines only
+            # python3 - <<'FILTER_SCRIPT'
+            # import json
+            # import subprocess
+            # import re
+            # 
+            # # Get the diff with line numbers
+            # diff_output = subprocess.run(['git', 'diff', '--unified=0', 'origin/${{ env.BASE_BRANCH }}...HEAD'], 
+            #                            capture_output=True, text=True).stdout
+            # 
+            # # Parse changed line ranges for each file
+            # changed_lines = {}
+            # current_file = None
+            # 
+            # for line in diff_output.split('\n'):
+            #     if line.startswith('+++'):
+            #         current_file = line[6:] if line.startswith('+++ b/') else line[4:]
+            #         changed_lines[current_file] = []
+            #     elif line.startswith('@@'):
+            #         # Parse hunk header: @@ -old_start,old_count +new_start,new_count @@
+            #         match = re.search(r'\+(\d+)(?:,(\d+))?', line)
+            #         if match and current_file:
+            #             start_line = int(match.group(1))
+            #             count = int(match.group(2)) if match.group(2) else 1
+            #             changed_lines[current_file].extend(range(start_line, start_line + count))
+            # 
+            # # Load semgrep results and filter
+            # try:
+            #     with open('semgrep-report.json', 'r') as f:
+            #         report = json.load(f)
+            # except:
+            #     report = {"results": []}
+            # 
+            # filtered_results = []
+            # for result in report.get('results', []):
+            #     file_path = result.get('path', '')
+            #     start_line = result.get('start', {}).get('line', 0)
+            #     
+            #     # Check if this finding is on a changed line
+            #     if file_path in changed_lines and start_line in changed_lines[file_path]:
+            #         filtered_results.append(result)
+            # 
+            # # Save filtered results
+            # filtered_report = {"results": filtered_results}
+            # with open('semgrep-report.json', 'w') as f:
+            #     json.dump(filtered_report, f, indent=2)
+            # 
+            # print(f"Filtered to {len(filtered_results)} findings on changed lines")
+            # FILTER_SCRIPT
+            
           fi
       
       - name: Build Markdown summary
@@ -72,6 +120,7 @@ jobs:
           python - <<'PY'
           import json
           import os
+          
           try:
               with open('semgrep-report.json', 'r') as f:
                   report = json.load(f)
@@ -83,9 +132,9 @@ jobs:
           results = report.get('results', []) or []
           
           if not results:
-              md = "✅ **Semgrep:** No issues found in changed code."
+              md = "✅ **Semgrep:** No security issues found in changed lines."
           else:
-              md = f"🚨 **Semgrep Scan** found **{len(results)}** issue(s)\n\n"
+              md = f"🚨 **Semgrep Scan** found **{len(results)}** issue(s) in changed lines\n\n"
               counts = {}
               lines = []
               max_show = 40
@@ -101,13 +150,30 @@ jobs:
                   severity = (r.get('extra', {}).get('severity') or r.get('severity') or 'INFO').upper()
                   
                   counts[severity] = counts.get(severity, 0) + 1
-                  lines.append(f"- **{severity}** `{rule}` — {msg}  \n  `{path}:{line}`")
+                  
+                  # Format with better styling
+                  severity_emoji = {
+                      'ERROR': '🔴', 'HIGH': '🔴',
+                      'WARNING': '🟡', 'MEDIUM': '🟡', 
+                      'INFO': '🔵', 'LOW': '🔵'
+                  }.get(severity, '⚪')
+                  
+                  lines.append(f"{severity_emoji} **{severity}** `{rule}` — {msg}  \n   📁 `{path}:{line}`")
               
-              md += "**Severity counts:**\n" + "\n".join([f"- {k}: {v}" for k, v in counts.items()]) + "\n\n"
+              if counts:
+                  md += "**Severity breakdown:**\n"
+                  for severity in ['ERROR', 'HIGH', 'WARNING', 'MEDIUM', 'INFO', 'LOW']:
+                      if severity in counts:
+                          emoji = {'ERROR': '🔴', 'HIGH': '🔴', 'WARNING': '🟡', 'MEDIUM': '🟡', 'INFO': '🔵', 'LOW': '🔵'}.get(severity, '⚪')
+                          md += f"- {emoji} {severity}: {counts[severity]}\n"
+                  md += "\n**Issues found:**\n"
+              
               md += "\n".join(lines)
               
               if len(results) > max_show:
-                  md += f"\n\n_Showing first {max_show} findings._"
+                  md += f"\n\n_Showing first {max_show} of {len(results)} findings._"
+                  
+              md += f"\n\n💡 **Note:** Only showing issues in lines you modified/added in this PR."
           
           with open('semgrep_report.md', 'w') as f:
               f.write(md)
