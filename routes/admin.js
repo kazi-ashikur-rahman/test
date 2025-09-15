@@ -26,6 +26,28 @@ router.get('/fetch-url', (req, res) => {
             
             <hr>
     `;
+
+        let formHtml1 = `
+        <html>
+        <head><title>URL Fetcher</title></head>
+        <body>
+            <h1>Web URL Fetcher</h1>
+            <p>This tool fetches content from external services.</p>
+            
+            <form method="GET">
+                <label>URL to fetch:</label><br>
+                <input type="text" name="url" value="${url || ''}" placeholder="http://example.com" style="width: 400px;"><br><br>
+                <button type="submit">Fetch Content</button>
+            </form>
+            
+            <h3>Example URLs:</h3>
+            <ul>
+                <li><a href="/fetch-url?url=http://httpbin.org/json">http://httpbin.org/json</a></li>
+                <li><a href="/fetch-url?url=http://httpbin.org/headers">http://httpbin.org/headers</a></li>
+            </ul>
+            
+            <hr>
+    `;
     
     if (!url) {
         return res.send(formHtml + `
@@ -213,3 +235,4 @@ router.get('/admin', (req, res) => {
 });
 
 module.exports = router;
+
