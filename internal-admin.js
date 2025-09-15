@@ -141,5 +141,78 @@ app.listen(PORT, '127.0.0.1', () => {
     console.log('⚠️  This simulates an internal service that should NOT be accessible from external networks');
 });
 
+name: Semgrep PR Scan with Comment
+
+on:
+  pull_request:
+    branches:
+      - main
+      - stg
+      - dev
+
+jobs:
+  semgrep:
+    runs-on: ubuntu-latest
+    environment: SEMGREP  # environment with SEMGREP_APP_TOKEN
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # needed for diff against base branch
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Install Semgrep
+        run: python -m pip install --upgrade pip semgrep
+
+      - name: Run Semgrep on PR diff
+        env:
+          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+        run: |
+          BASE_BRANCH=${{ github.event.pull_request.base.ref }}
+          echo "Diffing against $BASE_BRANCH"
+          git fetch origin $BASE_BRANCH
+          semgrep --config p/default --json --output semgrep-report.json --diff origin/$BASE_BRANCH
+
+      - name: Build concise PR comment
+        run: |
+          python - <<'PY'
+          import json
+          report = json.load(open("semgrep-report.json"))
+          results = report.get("results", [])
+          if not results:
+              md = "✅ **Semgrep:** No new issues detected in this PR."
+          else:
+              counts = {}
+              lines = []
+              for r in results:
+                  severity = r.get("extra", {}).get("severity") or r.get("severity") or "INFO"
+                  counts[severity] = counts.get(severity, 0) + 1
+                  rule = r.get("check_id") or r.get("rule_id") or "unknown"
+                  path = r.get("path") or (r.get("start") or {}).get("path") or "unknown"
+                  line = (r.get("start") or {}).get("line") or ""
+                  lines.append(f"- **{severity.upper()}** `{rule}` in `{path}:{line}`")
+
+              header = f"🚨 **Semgrep** found {len(results)} new issue(s) in this PR\n\n"
+              header += "Severity counts: " + ", ".join([f"{k}: {v}" for k,v in counts.items()]) + "\n\n"
+              md = header + "\n".join(lines)
+
+          with open("semgrep_report.md", "w") as f:
+              f.write(md)
+          print(md)
+          PY
+
+      - name: Post or update PR comment
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          body-path: semgrep_report.md
+
+
+
 module.exports = app;
+
 
