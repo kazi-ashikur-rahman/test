@@ -299,6 +299,27 @@ router.post('/reset', (req, res) => {
             </html>
         `);
     }
+
+
+        delete resetTokens[token];
+        
+        res.send(`
+            <html>
+            <head><title>Password Reset Success</title></head>
+            <body>
+                <h1>Password Reset Successful</h1>
+                <p>Account: ${user.email}</p>
+                <div>
+                    <h3>Demo Password Change:</h3>
+                    <p>Old Password: ${oldPassword}</p>
+                    <p>New Password: ${newPassword}</p>
+                    <p>Password successfully updated in demo database!</p>
+                </div>
+                <p><a href="/">Home</a> | <a href="/reset-password">Reset Another Password</a></p>
+            </body>
+            </html>
+        `);
 });
 
 module.exports = router;
+
