@@ -1,0 +1,79 @@
+name: Semgrep PR Scan with Comment
+on:
+  pull_request:
+
+jobs:
+  semgrep:
+    runs-on: ubuntu-latest
+    env:
+      # Change to 'none' | 'high' | 'all' to control failing behavior
+      FAIL_ON: 'none'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Install Semgrep
+        run: python -m pip install --upgrade pip semgrep
+
+      - name: Run Semgrep (JSON output)
+        run: semgrep --config p/default --json --output semgrep-report.json .
+
+      - name: Build Markdown summary (semgrep_report.md)
+        run: |
+          python - <<'PY'
+          import json, os, textwrap
+          def pick(d, *keys):
+              for k in keys:
+                  if k in d and d[k] is not None:
+                      return d[k]
+              return None
+
+          report = {}
+          try:
+              report = json.load(open('semgrep-report.json'))
+          except Exception as e:
+              open('semgrep_report.md','w').write("❗ Failed to read semgrep output: "+str(e))
+              raise
+
+          results = report.get('results', []) or report.get('matches', []) or []
+          if not results:
+              md = "✅ **Semgrep:** no findings.\n"
+          else:
+              counts = {}
+              lines = []
+              max_show = 40
+              for i, r in enumerate(results):
+                  if i >= max_show: break
+                  extra = r.get('extra', {}) if isinstance(r.get('extra', {}), dict) else {}
+                  rule = pick(r, 'check_id', 'rule_id', 'rule') or 'unknown'
+                  message = pick(extra, 'message', 'message') or r.get('message','').strip()
+                  path = pick(r, 'path') or (r.get('start') or {}).get('path') or 'unknown'
+                  line = (r.get('start') or {}).get('line') or (extra.get('start') or '')
+                  severity = (extra.get('severity') or r.get('severity') or 'INFO').upper()
+                  snippet = extra.get('lines') or r.get('lines') or ''
+                  counts[severity] = counts.get(severity,0) + 1
+                  code_block = f"```{snippet}```" if snippet else ""
+                  lines.append(f"- **{severity}** `{rule}` — {message}\n  `{path}:{line}`\n\n{code_block}\n")
+
+              header = f"🚨 **Semgrep** found **{len(results)}** issue(s)\n\n"
+              header += "Severity counts:\n" + "\n".join([f"- {k}: {v}" for k,v in sorted(counts.items(), key=lambda x: x[0], reverse=True)]) + "\n\n"
+              header += f"Showing up to {max_show} findings:\n\n"
+              md = header + "\n".join(lines)
+              if len(results) > max_show:
+                  md += f"\n\n_Showing first {max_show} findings. See workflow logs for full JSON (semgrep-report.json)._"
+
+          open('semgrep_report.md','w').write(md)
+          print(md)
+          PY
+
+      - name: Post/update PR comment with results
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          body-path: semgrep_report.md
