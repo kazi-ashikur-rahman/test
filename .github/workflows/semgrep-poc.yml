@@ -6,6 +6,10 @@ on:
       - main
       - stg
       - dev
+      
+permissions:
+  pull-requests: write
+  contents: read
 
 jobs:
   semgrep:
