@@ -7,7 +7,7 @@ const authRouter = require('./routes/auth');
 const adminRouter = require('./routes/admin');
 
 app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.urlencoded({ extended: true }));   
 
 app.use('/', indexRouter);
 app.use('/', authRouter);
@@ -35,3 +35,4 @@ server.on('error', (err) => {
 });
 
 module.exports = app;
+
