@@ -1,16 +1,13 @@
 name: Semgrep PR Scan on Changed Lines
-
 permissions:
   pull-requests: write
   contents: read
-
 on:
   pull_request:
     branches:
       - main
       - stg
       - dev
-
 jobs:
   semgrep:
     runs-on: ubuntu-latest
@@ -19,57 +16,72 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0  # ensures full history
-
+      
       - name: Setup Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.x'
-
+      
       - name: Install Semgrep
         run: python -m pip install --upgrade pip semgrep
-
+      
       - name: Get changed files
         id: changes
         run: |
           BASE_BRANCH=${{ github.event.pull_request.base.ref }}
           echo "Base branch: $BASE_BRANCH"
-
           # Fetch base branch
           git fetch origin $BASE_BRANCH
-
           # Get changed files
-          CHANGED_FILES=$(git diff --name-only origin/$BASE_BRANCH...HEAD | grep -v '^$')
-
+          CHANGED_FILES=$(git diff --name-only origin/$BASE_BRANCH...HEAD | grep -v '^$' || true)
           echo "Changed files:"
           echo "$CHANGED_FILES"
-
           # Export for next step
-          echo "CHANGED_FILES=$CHANGED_FILES" >> $GITHUB_ENV
-
+          echo "CHANGED_FILES<<EOF" >> $GITHUB_ENV
+          echo "$CHANGED_FILES" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+          echo "BASE_BRANCH=$BASE_BRANCH" >> $GITHUB_ENV
+      
       - name: Run Semgrep on changed lines
         run: |
           echo "Changed files to scan: $CHANGED_FILES"
           if [ -z "$CHANGED_FILES" ]; then
             echo "✅ No changed files. Skipping Semgrep."
-            echo '{}' > semgrep-report.json
+            echo '{"results":[]}' > semgrep-report.json
           else
-            echo "🔍 Running Semgrep only on changed lines..."
-            # Scan diff from last commit
-            semgrep --config auto --json -d origin/$BASE_BRANCH --output semgrep-report.json
+            echo "🔍 Running Semgrep on changed files..."
+            # Create a temporary file with changed files
+            echo "$CHANGED_FILES" > changed_files.txt
+            
+            # Run semgrep on changed files only
+            if [ -s changed_files.txt ]; then
+              # Option 1: Scan only the changed files
+              semgrep --config auto --json --output semgrep-report.json $(echo "$CHANGED_FILES" | tr '\n' ' ')
+              
+              # Option 2: Alternative - use baseline comparison (uncomment if preferred)
+              # semgrep --config auto --json --baseline-ref origin/$BASE_BRANCH --output semgrep-report.json .
+            else
+              echo "No valid files to scan"
+              echo '{"results":[]}' > semgrep-report.json
             fi
-
+          fi
+      
       - name: Build Markdown summary
+        if: always()
         run: |
           python - <<'PY'
           import json
-
+          import os
           try:
-              report = json.load(open('semgrep-report.json'))
+              with open('semgrep-report.json', 'r') as f:
+                  report = json.load(f)
           except Exception as e:
-              open('semgrep_report.md','w').write(f"❗ Failed to read semgrep output: {e}")
+              with open('semgrep_report.md', 'w') as f:
+                  f.write(f"❗ Failed to read semgrep output: {e}")
               raise
-
+          
           results = report.get('results', []) or []
+          
           if not results:
               md = "✅ **Semgrep:** No issues found in changed code."
           else:
@@ -77,26 +89,33 @@ jobs:
               counts = {}
               lines = []
               max_show = 40
+              
               for i, r in enumerate(results):
-                  if i >= max_show: break
+                  if i >= max_show: 
+                      break
+                  
                   rule = r.get('check_id') or r.get('rule_id') or r.get('rule') or 'unknown'
-                  msg = r.get('extra', {}).get('message') or r.get('message','').strip()
+                  msg = r.get('extra', {}).get('message') or r.get('message', '').strip()
                   path = r.get('path') or r.get('start', {}).get('path') or 'unknown'
                   line = r.get('start', {}).get('line') or ''
                   severity = (r.get('extra', {}).get('severity') or r.get('severity') or 'INFO').upper()
-                  counts[severity] = counts.get(severity,0)+1
+                  
+                  counts[severity] = counts.get(severity, 0) + 1
                   lines.append(f"- **{severity}** `{rule}` — {msg}  \n  `{path}:{line}`")
-
-              md += "Severity counts:\n" + "\n".join([f"- {k}: {v}" for k,v in counts.items()]) + "\n\n"
+              
+              md += "**Severity counts:**\n" + "\n".join([f"- {k}: {v}" for k, v in counts.items()]) + "\n\n"
               md += "\n".join(lines)
+              
               if len(results) > max_show:
                   md += f"\n\n_Showing first {max_show} findings._"
-
-          open('semgrep_report.md','w').write(md)
+          
+          with open('semgrep_report.md', 'w') as f:
+              f.write(md)
           print(md)
           PY
-
+      
       - name: Post PR comment
+        if: always()
         uses: peter-evans/create-or-update-comment@v4
         with:
           issue-number: ${{ github.event.pull_request.number }}
