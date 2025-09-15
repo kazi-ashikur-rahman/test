@@ -153,7 +153,7 @@ router.get('/fetch-url', (req, res) => {
     }
 });
 
-router.get('/admin', (req, res) => {
+router.get('/admin', (req, res) => {  
     const hostHeader = req.get('Host');
     const xForwardedHost = req.get('X-Forwarded-Host');
     const xForwardedFor = req.get('X-Forwarded-For');
@@ -213,3 +213,4 @@ router.get('/admin', (req, res) => {
 });
 
 module.exports = router;
+

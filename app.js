@@ -7,7 +7,7 @@ const authRouter = require('./routes/auth');
 const adminRouter = require('./routes/admin');
 
 app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.urlencoded({ extended: true }));   
 
 app.use('/', indexRouter);
 app.use('/', authRouter);
@@ -20,7 +20,7 @@ const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`  - Network:  http://192.168.1.213:${PORT}`);
 });
 
-server.on('error', (err) => {
+server.on('error', (err) => { 
     if (err.code === 'EACCES') {
         console.error(`Permission denied to bind to port ${PORT}`);
         console.log('Try running as administrator or use a different port');
@@ -35,3 +35,5 @@ server.on('error', (err) => {
 });
 
 module.exports = app;
+
+
