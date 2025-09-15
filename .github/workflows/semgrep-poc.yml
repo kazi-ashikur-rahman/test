@@ -50,12 +50,14 @@ jobs:
 
       - name: Run Semgrep on changed files
         run: |
+          echo "Changed files to scan: $CHANGED_FILES"
           if [ -z "$CHANGED_FILES" ]; then
             echo "✅ No changed files. Skipping Semgrep."
             echo '{}' > semgrep-report.json
           else
             echo "🔍 Running Semgrep on changed files..."
             semgrep --config auto --json --output semgrep-report.json $CHANGED_FILES
+          fi
 
       - name: Build Markdown summary
         run: |
