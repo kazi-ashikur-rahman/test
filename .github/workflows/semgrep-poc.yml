@@ -10,29 +10,44 @@ on:
 jobs:
   semgrep:
     runs-on: ubuntu-latest
-    environment: SEMGREP  # environment where SEMGREP_APP_TOKEN is set
     steps:
+      # 1️⃣ Checkout code
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Needed for diff scans
+          fetch-depth: 0   # fetch full history for diff
 
+      # 2️⃣ Setup Python
       - name: Setup Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.x'
 
+      # 3️⃣ Install Semgrep
       - name: Install Semgrep
         run: python -m pip install --upgrade pip semgrep
 
-      - name: Run Semgrep diff scan (JSON output)
-        env:
-          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
-          BASE_BRANCH: ${{ github.event.pull_request.base.ref }}
+      # 4️⃣ Get changed files only
+      - name: Get list of changed files
+        id: changes
         run: |
-          git fetch origin $BASE_BRANCH
-          semgrep ci --config=auto --json --output semgrep-report.json
+          echo "BASE_BRANCH=${{ github.event.pull_request.base.ref }}" >> $GITHUB_ENV
+          CHANGED_FILES=$(git diff --name-only origin/$BASE_BRANCH...HEAD)
+          echo "changed_files<<EOF" >> $GITHUB_ENV
+          echo "$CHANGED_FILES" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
 
+      # 5️⃣ Run Semgrep only on changed files
+      - name: Run Semgrep on changed files (JSON output)
+        run: |
+          if [ -z "$changed_files" ]; then
+            echo "No files changed. Skipping Semgrep."
+            echo '{}' > semgrep-report.json
+          else
+            semgrep --config auto --json --output semgrep-report.json $changed_files
+          fi
+
+      # 6️⃣ Build Markdown summary
       - name: Build Markdown summary
         run: |
           python - <<'PY'
@@ -44,35 +59,45 @@ jobs:
                       return d[k]
               return None
 
-          report = {}
+          md = ""
           try:
               report = json.load(open('semgrep-report.json'))
           except Exception as e:
-              open('semgrep_report.md','w').write("❗ Failed to read semgrep output: "+str(e))
+              md = "❗ Failed to read semgrep output: "+str(e)
+              open('semgrep_report.md','w').write(md)
               raise
 
           results = report.get('results', []) or []
           if not results:
-              md = "✅ **Semgrep:** No new issues found in this PR.\n"
+              md = "✅ **Semgrep:** No issues found in changed code."
           else:
               lines = []
-              for r in results:
+              max_show = 40
+              counts = {}
+              for i, r in enumerate(results):
+                  if i >= max_show: break
                   extra = r.get('extra', {}) if isinstance(r.get('extra', {}), dict) else {}
                   rule = pick(r, 'check_id', 'rule_id', 'rule') or 'unknown'
-                  message = pick(extra, 'message') or r.get('message','').strip()
+                  message = pick(extra, 'message', 'message') or r.get('message','').strip()
                   path = pick(r, 'path') or (r.get('start') or {}).get('path') or 'unknown'
                   line = (r.get('start') or {}).get('line') or (extra.get('start') or '')
                   severity = (extra.get('severity') or r.get('severity') or 'INFO').upper()
-                  lines.append(f"- **{severity}** `{rule}` — `{path}:{line}` — {message}")
+                  counts[severity] = counts.get(severity,0) + 1
+                  lines.append(f"- **{severity}** `{rule}` — {message}  \n  `{path}:{line}`")
 
-              header = f"🚨 **Semgrep PR Scan Result:** Found **{len(results)}** potential issue(s)\n\n"
+              header = f"🚨 **Semgrep Scan** found **{len(results)}** issue(s)\n\n"
+              header += "Severity counts:\n" + "\n".join([f"- {k}: {v}" for k,v in sorted(counts.items(), key=lambda x: x[0], reverse=True)]) + "\n\n"
+              header += f"Showing up to {max_show} findings:\n\n"
               md = header + "\n".join(lines)
+              if len(results) > max_show:
+                  md += f"\n\n_Showing first {max_show} findings. See workflow logs for full JSON (semgrep-report.json)._"
 
           open('semgrep_report.md','w').write(md)
           print(md)
           PY
 
-      - name: Post or update PR comment
+      # 7️⃣ Post or update PR comment
+      - name: Post PR comment
         uses: peter-evans/create-or-update-comment@v4
         with:
           issue-number: ${{ github.event.pull_request.number }}
