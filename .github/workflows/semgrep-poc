@@ -1,5 +1,6 @@
 name: Semgrep PR Scan with Comment
 
+# Trigger only for PRs targeting specific branches
 on:
   pull_request:
     branches:
@@ -10,28 +11,33 @@ on:
 jobs:
   semgrep:
     runs-on: ubuntu-latest
-    environment: SEMGREP   # <-- The environment with SEMGREP_APP_TOKEN
+    environment: SEMGREP   # environment containing SEMGREP_APP_TOKEN
     permissions:
-      contents: read
-      pull-requests: write
+      contents: read        # needed to checkout code
+      pull-requests: write  # needed to post PR comments
 
     steps:
+      # Step 1: Checkout PR code
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # Step 2: Setup Python
       - name: Setup Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.x'
 
+      # Step 3: Install Semgrep
       - name: Install Semgrep
         run: python -m pip install --upgrade pip semgrep
 
+      # Step 4: Run Semgrep scan
       - name: Run Semgrep scan
         env:
           SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
         run: semgrep --config p/default --json --output semgrep-report.json .
 
+      # Step 5: Convert JSON to Markdown for PR comment
       - name: Build Markdown report
         run: |
           python - <<'PY'
@@ -46,7 +52,7 @@ jobs:
           try:
               report = json.load(open('semgrep-report.json'))
           except Exception as e:
-              open('semgrep_report.md','w').write("❗ Failed to read semgrep output: "+str(e))
+              open('semgrep_report.md','w').write("❗ Failed to read Semgrep output: "+str(e))
               raise
 
           results = report.get('results', []) or []
@@ -80,7 +86,8 @@ jobs:
           print(md)
           PY
 
-      - name: Post or update PR comment
+      # Step 6: Post or update PR comment
+      - name: Post PR comment
         uses: peter-evans/create-or-update-comment@v4
         with:
           issue-number: ${{ github.event.pull_request.number }}
