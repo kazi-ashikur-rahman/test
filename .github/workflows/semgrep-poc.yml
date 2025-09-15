@@ -48,13 +48,14 @@ jobs:
 
       - name: Run Semgrep on changed lines
         run: |
+          echo "Changed files to scan: $CHANGED_FILES"
           if [ -z "$CHANGED_FILES" ]; then
             echo "✅ No changed files. Skipping Semgrep."
             echo '{}' > semgrep-report.json
           else
             echo "🔍 Running Semgrep only on changed lines..."
-            # Use diff mode relative to base branch
             semgrep --config auto --json --diff origin/$BASE_BRANCH --output semgrep-report.json $CHANGED_FILES
+          fi
 
       - name: Build Markdown summary
         run: |
