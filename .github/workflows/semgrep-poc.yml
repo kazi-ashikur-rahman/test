@@ -18,7 +18,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 0  # ensures full history
 
       - name: Setup Python
         uses: actions/setup-python@v4
@@ -54,8 +54,8 @@ jobs:
             echo '{}' > semgrep-report.json
           else
             echo "🔍 Running Semgrep only on changed lines..."
-            semgrep --config auto --json -d origin/${{ github.event.pull_request.base.ref }} --output semgrep-report.json
-          fi
+            # Scan diff from last commit
+            semgrep --config auto --json -d HEAD~1 --output semgrep-report.json
 
       - name: Build Markdown summary
         run: |
