@@ -104,7 +104,7 @@ app.get('/', (req, res) => {
             port: PORT,
             description: 'This is an internal microservice for system administration',
             endpoints: {
-                '/internal-admin': 'Internal Admin panel',
+                '/internal-admin': 'Internal Admin panel', 
                 '/': 'Service information',
                 '/health': 'Health check'
             },
@@ -142,3 +142,4 @@ app.listen(PORT, '127.0.0.1', () => {
 });
 
 module.exports = app;
+
