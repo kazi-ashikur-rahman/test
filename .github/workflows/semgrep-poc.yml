@@ -39,14 +39,14 @@ jobs:
           # Save diff with exact changed lines (no context)
           git diff --unified=0 origin/$BASE_BRANCH...HEAD > changed.diff
           echo "Generated diff file:"
-          head -n 50 changed.diff
+          head -n 20 changed.diff
 
-      - name: Run Semgrep on all changed files
+      - name: Run Semgrep on all files
         run: |
           echo "🔍 Running Semgrep..."
           semgrep --config auto --json --output semgrep-report.json
 
-      - name: Filter results to changed lines
+      - name: Filter results (direct vs indirect)
         run: |
           python - <<'PY'
           import json, re
@@ -70,23 +70,39 @@ jobs:
                       for l in range(start, start+count):
                           diff_map[current_file].add(l)
 
-          # Filter results to only those in changed lines
-          filtered = []
+          direct, indirect = [], []
           for r in results:
               path = r.get("path")
               line = r.get("start", {}).get("line")
-              if path in diff_map and line in diff_map[path]:
-                  filtered.append(r)
+              if not path: 
+                  continue
 
-          report['results'] = filtered
-          json.dump(report, open('semgrep-report.json','w'))
-          print(f"Filtered findings: {len(filtered)} (from {len(results)})")
+              if path in diff_map:
+                  if line in diff_map[path]:
+                      r['category'] = 'direct'
+                      direct.append(r)
+                  else:
+                      r['category'] = 'indirect'
+                      indirect.append(r)
+
+          out = {
+              "results": direct + indirect,
+              "summary": {
+                  "direct": len(direct),
+                  "indirect": len(indirect),
+                  "total": len(results)
+              },
+              "diff_map": diff_map
+          }
+          json.dump(out, open('semgrep-report.json','w'))
+          print(f"Direct findings: {len(direct)} | Indirect findings: {len(indirect)} | Total: {len(results)}")
           PY
 
       - name: Build Markdown summary
         run: |
           python - <<'PY'
           import json
+
           try:
               report = json.load(open('semgrep-report.json'))
           except Exception as e:
@@ -94,23 +110,33 @@ jobs:
               raise
 
           results = report.get('results', []) or []
+          summary = report.get('summary', {})
+          direct_count = summary.get("direct", 0)
+          indirect_count = summary.get("indirect", 0)
+          total = summary.get("total", len(results))
+
           if not results:
               md = "✅ **Semgrep:** No issues found in changed code."
           else:
-              md = f"🚨 **Semgrep Scan** found **{len(results)}** issue(s) in changed lines\n\n"
-              counts = {}
+              md = f"🚨 **Semgrep Scan** found **{total}** issue(s)\n\n"
+              md += f"- 🟢 Direct (inside changed lines): {direct_count}\n"
+              md += f"- 🟡 Indirect (same file, outside changed lines): {indirect_count}\n\n"
+
               lines = []
-              for r in results:
+              max_show = 50
+              for i, r in enumerate(results):
+                  if i >= max_show: break
                   rule = r.get('check_id') or r.get('rule_id') or 'unknown'
                   msg = r.get('extra', {}).get('message') or r.get('message','').strip()
                   path = r.get('path') or 'unknown'
                   line = r.get('start', {}).get('line') or ''
                   severity = (r.get('extra', {}).get('severity') or 'INFO').upper()
-                  counts[severity] = counts.get(severity,0)+1
-                  lines.append(f"- **{severity}** `{rule}` — {msg}  \n  `{path}:{line}`")
+                  category = "🟢 Direct" if r.get('category') == 'direct' else "🟡 Indirect"
+                  lines.append(f"- **{severity}** `{rule}` ({category}) — {msg}  \n  `{path}:{line}`")
 
-              md += "Severity counts:\n" + "\n".join([f"- {k}: {v}" for k,v in counts.items()]) + "\n\n"
               md += "\n".join(lines)
+              if len(results) > max_show:
+                  md += f"\n\n_Showing first {max_show} findings._"
 
           open('semgrep_report.md','w').write(md)
           print(md)
