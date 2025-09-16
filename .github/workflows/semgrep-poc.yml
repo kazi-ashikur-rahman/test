@@ -85,6 +85,9 @@ jobs:
                       r['category'] = 'indirect'
                       indirect.append(r)
 
+          # ✅ Convert sets -> lists before dumping
+          diff_map = {f: sorted(list(lines)) for f, lines in diff_map.items()}
+
           out = {
               "results": direct + indirect,
               "summary": {
@@ -94,7 +97,10 @@ jobs:
               },
               "diff_map": diff_map
           }
-          json.dump(out, open('semgrep-report.json','w'))
+
+          with open("semgrep-report.json", "w") as f:
+              json.dump(out, f, indent=2)
+
           print(f"Direct findings: {len(direct)} | Indirect findings: {len(indirect)} | Total: {len(results)}")
           PY
 
@@ -111,6 +117,8 @@ jobs:
 
           results = report.get('results', []) or []
           summary = report.get('summary', {})
+          diff_map = report.get('diff_map', {})
+
           direct_count = summary.get("direct", 0)
           indirect_count = summary.get("indirect", 0)
           total = summary.get("total", len(results))
@@ -121,6 +129,12 @@ jobs:
               md = f"🚨 **Semgrep Scan** found **{total}** issue(s)\n\n"
               md += f"- 🟢 Direct (inside changed lines): {direct_count}\n"
               md += f"- 🟡 Indirect (same file, outside changed lines): {indirect_count}\n\n"
+
+              if diff_map:
+                  md += "### 📂 Changed lines by file:\n"
+                  for f, lines in diff_map.items():
+                      md += f"- `{f}`: {lines}\n"
+                  md += "\n"
 
               lines = []
               max_show = 50
