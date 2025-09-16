@@ -39,7 +39,7 @@ jobs:
           # Save diff with exact changed lines (no context)
           git diff --unified=0 --ignore-space-change origin/$BASE_BRANCH...HEAD
           echo "Generated diff file:"
-          head -n 50 changed.diff
+          cat changed.diff
 
       - name: Run Semgrep on all changed files
         run: |
