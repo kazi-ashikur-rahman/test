@@ -37,7 +37,7 @@ jobs:
           git fetch origin $BASE_BRANCH
           
           # Save diff with exact changed lines (no context)
-          git diff --unified=0 origin/$BASE_BRANCH...HEAD > changed.diff
+          git diff --unified=0 --ignore-space-change origin/$BASE_BRANCH...HEAD
           echo "Generated diff file:"
           head -n 20 changed.diff
 
