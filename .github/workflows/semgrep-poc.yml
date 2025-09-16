@@ -36,10 +36,10 @@ jobs:
 
           git fetch origin $BASE_BRANCH
           
-          # Save diff with exact changed lines (no context)
-          git diff --unified=0 --ignore-space-change origin/$BASE_BRANCH...HEAD  > changed.diff
+          # Save diff to file
+          git diff --unified=0 --ignore-space-change origin/$BASE_BRANCH...HEAD > changed.diff
           echo "Generated diff file:"
-          cat changed.diff
+          head -n 50 changed.diff
 
       - name: Run Semgrep on all changed files
         run: |
@@ -58,6 +58,8 @@ jobs:
           # Load diff into mapping: {filename: set([lines])}
           diff_map = {}
           current_file = None
+          margin = 16  # Add 16 lines above each hunk
+
           for line in open('changed.diff'):
               if line.startswith("+++ b/"):
                   current_file = line[6:].strip()
@@ -67,7 +69,8 @@ jobs:
                   if m and current_file:
                       start = int(m.group(1))
                       count = int(m.group(2) or 1)
-                      for l in range(start, start+count):
+                      # Add 16 lines margin above the hunk
+                      for l in range(max(start - margin, 1), start + count):
                           diff_map[current_file].add(l)
 
           # Filter results to only those in changed lines
@@ -79,7 +82,7 @@ jobs:
                   filtered.append(r)
 
           report['results'] = filtered
-          json.dump(report, open('semgrep-report.json','w'))
+          json.dump(report, open('semgrep-report.json','w'), indent=2)
           print(f"Filtered findings: {len(filtered)} (from {len(results)})")
           PY
 
