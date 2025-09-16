@@ -39,7 +39,7 @@ jobs:
           # Save diff with exact changed lines (no context)
           git diff --unified=0 origin/$BASE_BRANCH...HEAD > changed.diff
           echo "Generated diff file:"
-          head -n 20 changed.diff
+          head -n 50 changed.diff
 
       - name: Run Semgrep on all changed files
         run: |
