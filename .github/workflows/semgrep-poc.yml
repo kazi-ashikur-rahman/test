@@ -36,17 +36,17 @@ jobs:
 
           git fetch origin $BASE_BRANCH
           
-          # Save diff to file with more context for debugging
-          git diff --unified=3 --ignore-space-change origin/$BASE_BRANCH...HEAD > changed.diff
-          echo "Generated diff file:"
-          head -n 50 changed.diff
+          # Use --unified=0 to get only changed lines without context
+          git diff --unified=0 --ignore-space-change origin/$BASE_BRANCH...HEAD > changed.diff
+          echo "Generated diff file (first 30 lines):"
+          head -n 30 changed.diff
 
       - name: Run Semgrep on all changed files
         run: |
           echo "🔍 Running Semgrep..."
           semgrep --config auto --json --output semgrep-report.json
 
-      - name: Filter results to changed lines
+      - name: Filter results to changed lines with 15-line margin
         run: |
           python - <<'PY'
           import json, re
@@ -55,77 +55,67 @@ jobs:
           report = json.load(open('semgrep-report.json'))
           results = report.get('results', [])
 
-          # Parse diff to get actual changed lines (no artificial margin)
+          # Parse diff to get actual changed lines
           diff_map = {}
           current_file = None
 
           print("Parsing diff file...")
           
           with open('changed.diff', 'r') as f:
-              diff_lines = f.readlines()
+              diff_content = f.read()
 
-          i = 0
-          while i < len(diff_lines):
-              line = diff_lines[i].strip()
+          for line in diff_content.split('\n'):
+              line = line.strip()
               
               # Match file header: +++ b/filename
               if line.startswith("+++ b/"):
-                  current_file = line[6:].strip()
+                  current_file = line[6:]
                   diff_map[current_file] = set()
                   print(f"Found file: {current_file}")
               
               # Match hunk header: @@ -old_start,old_count +new_start,new_count @@
               elif line.startswith("@@") and current_file:
-                  # Extract new file line information
                   match = re.search(r'@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@', line)
                   if match:
-                      new_start = int(match.group(1))
-                      new_count = int(match.group(2)) if match.group(2) else 1
+                      start_line = int(match.group(1))
+                      line_count = int(match.group(2)) if match.group(2) else 1
                       
-                      print(f"  Hunk: +{new_start},{new_count}")
+                      print(f"  Raw hunk: {line}")
+                      print(f"  Parsed: start={start_line}, count={line_count}")
                       
-                      # Parse the actual hunk content to find added/modified lines
-                      j = i + 1
-                      current_new_line = new_start
+                      # Add the exact changed lines
+                      actual_changed_lines = set()
+                      for line_num in range(start_line, start_line + line_count):
+                          actual_changed_lines.add(line_num)
                       
-                      while j < len(diff_lines):
-                          hunk_line = diff_lines[j]
-                          
-                          # Stop at next file or hunk
-                          if hunk_line.startswith('@@') or hunk_line.startswith('+++') or hunk_line.startswith('---'):
-                              break
-                          
-                          # Process different line types
-                          if hunk_line.startswith('+') and not hunk_line.startswith('+++'):
-                              # Added line - this is a changed line
-                              diff_map[current_file].add(current_new_line)
-                              current_new_line += 1
-                          elif hunk_line.startswith('-') and not hunk_line.startswith('---'):
-                              # Deleted line - don't increment new line counter
-                              pass
-                          elif hunk_line.startswith(' '):
-                              # Context line - increment new line counter but don't mark as changed
-                              current_new_line += 1
-                          elif hunk_line.strip() == '':
-                              # Empty line - likely end of hunk
-                              break
-                              
-                          j += 1
+                      # Add 15-line margin above the changed lines
+                      margin = 15
+                      extended_lines = set()
+                      for line_num in actual_changed_lines:
+                          # Add the actual line
+                          extended_lines.add(line_num)
+                          # Add 15 lines above it
+                          for margin_line in range(max(1, line_num - margin), line_num):
+                              extended_lines.add(margin_line)
                       
-                      i = j - 1  # Will be incremented by main loop
-              
-              i += 1
+                      diff_map[current_file].update(extended_lines)
+                      
+                      actual_range = f"{min(actual_changed_lines)}-{max(actual_changed_lines)}" if len(actual_changed_lines) > 1 else str(list(actual_changed_lines)[0])
+                      extended_range = f"{min(extended_lines)}-{max(extended_lines)}" if len(extended_lines) > 1 else str(list(extended_lines)[0])
+                      
+                      print(f"  Actual changed lines: {actual_range}")
+                      print(f"  With 15-line margin: {extended_range}")
 
-          # Debug: Print detected changed lines
-          print("\nDetected changed lines:")
+          # Debug: Print all detected lines
+          print("\nDetected lines (with 15-line margin):")
           for file, lines in diff_map.items():
               if lines:
                   sorted_lines = sorted(lines)
-                  print(f"  {file}: {sorted_lines}")
+                  print(f"  {file}: {len(sorted_lines)} lines")
                   if len(sorted_lines) > 1:
                       print(f"    Range: {min(sorted_lines)}-{max(sorted_lines)}")
 
-          # Filter results to only those in changed lines
+          # Filter results to only those in extended changed lines
           filtered = []
           print(f"\nFiltering {len(results)} Semgrep findings...")
           
@@ -135,25 +125,25 @@ jobs:
               end_line = r.get("end", {}).get("line", start_line)
               
               if path in diff_map:
-                  # Check if any line of the finding overlaps with changed lines
+                  # Check if any line of the finding overlaps with extended changed lines
                   finding_lines = set(range(start_line, end_line + 1))
-                  changed_lines = diff_map[path]
+                  extended_changed_lines = diff_map[path]
                   
-                  if finding_lines & changed_lines:  # Set intersection
-                      overlapping_lines = sorted(finding_lines & changed_lines)
-                      print(f"  ✓ Keeping finding in {path}:{start_line}-{end_line} (overlaps with changed lines: {overlapping_lines})")
+                  if finding_lines & extended_changed_lines:  # Set intersection
+                      overlapping_lines = sorted(finding_lines & extended_changed_lines)
+                      print(f"  ✓ Keeping finding in {path}:{start_line}-{end_line} (overlaps: {overlapping_lines})")
                       r['overlapping_changed_lines'] = overlapping_lines
                       filtered.append(r)
                   else:
-                      print(f"  ✗ Skipping finding in {path}:{start_line}-{end_line} (no overlap with changed lines)")
+                      print(f"  ✗ Skipping finding in {path}:{start_line}-{end_line} (no overlap)")
               else:
-                  print(f"  ✗ Skipping finding in {path} (file not in changed files)")
+                  print(f"  ✗ Skipping finding in {path} (file not changed)")
 
           report['results'] = filtered
           report['debug_info'] = {
               'total_original_findings': len(results),
               'filtered_findings': len(filtered),
-              'changed_files': {k: sorted(v) for k, v in diff_map.items() if v}
+              'changed_files_with_margin': {k: sorted(v) for k, v in diff_map.items() if v}
           }
           
           json.dump(report, open('semgrep-report.json','w'), indent=2)
@@ -174,45 +164,25 @@ jobs:
           debug_info = report.get('debug_info', {})
           
           if not results:
-              md = "✅ **Semgrep:** No issues found in changed code lines.\n\n"
+              md = "✅ **Semgrep:** No issues found in changed code area (with 15-line margin).\n\n"
               if debug_info.get('total_original_findings', 0) > 0:
-                  md += f"_Note: {debug_info['total_original_findings']} findings were found in changed files but not in the lines you modified._"
+                  md += f"_Note: {debug_info['total_original_findings']} findings were found in changed files but outside the detection area._"
           else:
-              md = f"🚨 **Semgrep Scan** found **{len(results)}** issue(s) in your changed code lines\n\n"
+              md = f"🚨 **Semgrep Scan** found **{len(results)}** issue(s) in your changed code area\n\n"
               
               # Show debug info
               if debug_info:
                   md += f"📊 **Scan Summary:**\n"
                   md += f"- Total findings in changed files: {debug_info.get('total_original_findings', 0)}\n"
-                  md += f"- Findings in your modified lines: {len(results)}\n\n"
+                  md += f"- Findings in detection area (changed lines + 15-line margin): {len(results)}\n\n"
               
-              # Show changed files and lines for transparency
-              if debug_info.get('changed_files'):
-                  md += f"📝 **Your Changes:**\n"
-                  for file, lines in debug_info['changed_files'].items():
+              # Show changed files detection area
+              if debug_info.get('changed_files_with_margin'):
+                  md += f"📝 **Detection Area (Changed Lines + 15-line margin):**\n"
+                  for file, lines in debug_info['changed_files_with_margin'].items():
                       if lines:
-                          line_ranges = []
-                          if len(lines) == 1:
-                              line_ranges.append(str(lines[0]))
-                          else:
-                              # Group consecutive lines into ranges
-                              start = lines[0]
-                              end = lines[0]
-                              for line in lines[1:]:
-                                  if line == end + 1:
-                                      end = line
-                                  else:
-                                      if start == end:
-                                          line_ranges.append(str(start))
-                                      else:
-                                          line_ranges.append(f"{start}-{end}")
-                                      start = end = line
-                              if start == end:
-                                  line_ranges.append(str(start))
-                              else:
-                                  line_ranges.append(f"{start}-{end}")
-                          
-                          md += f"- `{file}`: lines {', '.join(line_ranges)}\n"
+                          line_range = f"{min(lines)}-{max(lines)}" if len(lines) > 1 else str(lines[0])
+                          md += f"- `{file}`: lines {line_range} ({len(lines)} lines)\n"
                   md += "\n"
               
               # Group findings by severity
@@ -229,13 +199,13 @@ jobs:
                   counts[severity] = counts.get(severity,0)+1
                   
                   severity_emoji = "🔴" if severity == "ERROR" else "🟡" if severity == "WARNING" else "🔵"
-                  overlap_info = f" (affects your lines: {', '.join(map(str, overlapping_lines))})" if overlapping_lines else ""
+                  overlap_info = f" (detection area lines: {', '.join(map(str, overlapping_lines))})" if overlapping_lines else ""
                   
                   lines.append(f"- {severity_emoji} **{severity}** `{rule}` — {msg}  \n  📍 `{path}:{line}`{overlap_info}")
 
               md += "**Severity Breakdown:**\n" + "\n".join([f"- {k}: {v}" for k,v in counts.items()]) + "\n\n"
               md += "**Issues Found:**\n" + "\n".join(lines)
-              md += "\n\n💡 **Please review and fix these issues in your changed code before merging.**"
+              md += "\n\n💡 **Note:** This scan includes your changed lines plus a 15-line margin above for context."
 
           open('semgrep_report.md','w').write(md)
           print(md)
