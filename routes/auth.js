@@ -28,6 +28,8 @@ router.get('/login', (req, res) => {
     `);
 });
 
+
+
 router.post('/login', (req, res) => {
     const { email, password } = req.body;
     
@@ -91,6 +93,31 @@ router.post('/reset-password', (req, res) => {
             </html>
         `);
     }
+    
+    // Vulnerable route for testing IDOR
+router.get('/reset-bypass', (req, res) => {
+    const { email } = req.query;
+
+    if (!email) {
+        return res.send('Provide an email in query like ?email=user1@example.com');
+    }
+
+    const user = Object.values(users).find(u => u.email === email);
+    if (!user) {
+        return res.send('User not found!');
+    }
+
+    // ⚠️ Vulnerable: lets anyone reset the password without token
+    user.password = 'P@ssw0rd123';
+    
+    res.send(`
+        <h1>Password Reset Bypassed (Demo)</h1>
+        <p>Email: ${email}</p>
+        <p>New Password: P@ssw0rd123</p>
+        <p>This simulates an IDOR vulnerability for testing.</p>
+    `);
+});
+
     
     const token = Math.random().toString(36).substring(2, 15);
     resetTokens[token] = { email, expires: Date.now() + 3600000 };
@@ -302,3 +329,4 @@ router.post('/reset', (req, res) => {
 });
 
 module.exports = router;
+

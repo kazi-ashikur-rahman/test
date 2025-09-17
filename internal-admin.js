@@ -123,6 +123,36 @@ app.get('/', (req, res) => {
     }
 });
 
+
+pp.get('/', (req, res) => {
+    const clientIP = req.connection.remoteAddress || req.socket.remoteAddress;
+    
+    if (clientIP === '127.0.0.1' || clientIP === '::1') {
+        res.json({
+            service: 'Internal Administration Service',
+            version: '2.1.0',
+            status: 'running',
+            port: PORT,
+            description: 'This is an internal microservice for system administration',
+            endpoints: {
+                '/internal-admin': 'Internal Admin panel',
+                '/': 'Service information',
+                '/health': 'Health check'
+            },
+            security_note: 'Admin panel requires proxy headers for access',
+            client_ip: clientIP,
+            access_policy: 'Basic info: localhost only | Admin panel: localhost + proxy headers',
+            timestamp: new Date().toISOString()
+        });
+    } else {
+        res.status(403).json({
+            error: 'ACCESS_DENIED',
+            message: 'Service only accessible from localhost',
+            client_ip: clientIP,
+            blocked_at: new Date().toISOString()
+        });
+
+        
 app.get('/health', (req, res) => {
     res.json({
         status: 'healthy',
