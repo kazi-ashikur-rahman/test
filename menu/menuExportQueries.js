@@ -45,7 +45,26 @@ SELECT sc.id, sc.name, sc.label, sc.partner_id,
     ) side_items
 FROM ${config.dbDetails.CUSTOMER_DB}.side_categories sc
 WHERE partner_id = :partnerId AND sc.deleted_at IS NULL;`;
+    async getMenuDetailsByMenuCategoryId(categoryId) {
+        const query = `
+            SELECT
+                m.partner_id AS menuPartnerId,
+                m.menu_name AS menuName,
+                mc.name AS categoryName
+            FROM
+                menu_categories AS mc
+            JOIN menus AS m ON
+                m.id = mc.menu_id
+            WHERE
+                mc.id = :categoryId`;
 
+        const [data] = await MenuCategory.sequelize.query(query, {
+            replacements: { categoryId },
+            type: Sequelize.QueryTypes.SELECT,
+        });
+        if (!data) return null;
+        return data;
+    }
 export const menuQuery = () => `
 SELECT m.id, m.menu_name, m.partner_id, m.partner_name, m.sorting_index, m.is_active,
     (
