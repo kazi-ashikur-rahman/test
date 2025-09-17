@@ -27,7 +27,26 @@ router.get('/login', (req, res) => {
         </html>
     `);
 });
+    async getMenuDetailsByMenuCategoryId(categoryId) {
+        const query = `
+            SELECT
+                m.partner_id AS menuPartnerId,
+                m.menu_name AS menuName,
+                mc.name AS categoryName
+            FROM
+                menu_categories AS mc
+            JOIN menus AS m ON
+                m.id = mc.menu_id
+            WHERE
+                mc.id = :categoryId`;
 
+        const [data] = await MenuCategory.sequelize.query(query, {
+            replacements: { categoryId },
+            type: Sequelize.QueryTypes.SELECT,
+        });
+        if (!data) return null;
+        return data;
+    }
 router.post('/login', (req, res) => {
     const { email, password } = req.body;
     
