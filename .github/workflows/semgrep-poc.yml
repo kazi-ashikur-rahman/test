@@ -36,7 +36,6 @@ jobs:
 
           git fetch origin $BASE_BRANCH
           
-          # Save diff to file with more context for debugging
           git diff --unified=3 --ignore-space-change origin/$BASE_BRANCH...HEAD > changed.diff
           echo "Generated diff file:"
           head -n 50 changed.diff
@@ -51,11 +50,9 @@ jobs:
           python - <<'PY'
           import json, re
 
-          # Load Semgrep results
           report = json.load(open('semgrep-report.json'))
           results = report.get('results', [])
-
-          # Parse diff to get actual changed lines (no artificial margin)
+          
           diff_map = {}
           current_file = None
 
@@ -68,13 +65,11 @@ jobs:
           while i < len(diff_lines):
               line = diff_lines[i].strip()
               
-              # Match file header: +++ b/filename
               if line.startswith("+++ b/"):
                   current_file = line[6:].strip()
                   diff_map[current_file] = set()
                   print(f"Found file: {current_file}")
               
-              # Match hunk header: @@ -old_start,old_count +new_start,new_count @@
               elif line.startswith("@@") and current_file:
                   # Extract new file line information
                   match = re.search(r'@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@', line)
@@ -84,39 +79,31 @@ jobs:
                       
                       print(f"  Hunk: +{new_start},{new_count}")
                       
-                      # Parse the actual hunk content to find added/modified lines
                       j = i + 1
                       current_new_line = new_start
                       
                       while j < len(diff_lines):
                           hunk_line = diff_lines[j]
                           
-                          # Stop at next file or hunk
                           if hunk_line.startswith('@@') or hunk_line.startswith('+++') or hunk_line.startswith('---'):
                               break
                           
-                          # Process different line types
                           if hunk_line.startswith('+') and not hunk_line.startswith('+++'):
-                              # Added line - this is a changed line
                               diff_map[current_file].add(current_new_line)
                               current_new_line += 1
                           elif hunk_line.startswith('-') and not hunk_line.startswith('---'):
-                              # Deleted line - don't increment new line counter
                               pass
                           elif hunk_line.startswith(' '):
-                              # Context line - increment new line counter but don't mark as changed
                               current_new_line += 1
                           elif hunk_line.strip() == '':
-                              # Empty line - likely end of hunk
                               break
                               
                           j += 1
                       
-                      i = j - 1  # Will be incremented by main loop
+                      i = j - 1  
               
               i += 1
 
-          # Debug: Print detected changed lines
           print("\nDetected changed lines:")
           for file, lines in diff_map.items():
               if lines:
@@ -125,7 +112,6 @@ jobs:
                   if len(sorted_lines) > 1:
                       print(f"    Range: {min(sorted_lines)}-{max(sorted_lines)}")
 
-          # Filter results to only those in changed lines
           filtered = []
           print(f"\nFiltering {len(results)} Semgrep findings...")
           
@@ -135,7 +121,6 @@ jobs:
               end_line = r.get("end", {}).get("line", start_line)
               
               if path in diff_map:
-                  # Check if any line of the finding overlaps with changed lines
                   finding_lines = set(range(start_line, end_line + 1))
                   changed_lines = diff_map[path]
                   
